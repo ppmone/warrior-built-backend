@@ -16,6 +16,15 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "firebase-admin": "^13.4.0",
+    "sqlite3": "^5.1.7",
     "stripe": "^18.3.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ppmone/warrior-built-backend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ppmone/warrior-built-backend/issues"
+  },
+  "homepage": "https://github.com/ppmone/warrior-built-backend#readme"
 }
