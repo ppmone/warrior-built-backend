@@ -3,22 +3,93 @@ require("dotenv").config(); // Load environment variables
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const db = require("./db"); // Import SQLite database connection
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
-// Enable CORS
-app.use(cors({ origin: "http://localhost:5175" })); // Allow requests from your frontend
+// CORS configuration - must be before any routes
+app.use(cors({
+    origin: "http://localhost:5175",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+    optionsSuccessStatus: 200
+}));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 // Middleware
 app.use(bodyParser.json());
-app.use(bodyParser.raw({ type: "application/json" })); // For Stripe webhook
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Add logging middleware to debug requests
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path} - Origin: ${req.get('Origin')}`);
+    next();
+});
 
 // Routes
 app.get("/", (req, res) => {
-    res.send("Node.js backend is running!");
+    res.json({ message: "Node.js backend is running!" });
+});
+
+/**
+ * Fetch subscription status for a user.
+ */
+app.get("/api/users/:userId/subscription", (req, res) => {
+    const userId = req.params.userId;
+    console.log(`Fetching subscription for user: ${userId}`);
+
+    if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+    }
+
+    db.get("SELECT isSubscribed FROM users WHERE id = ?", [userId], (err, row) => {
+        if (err) {
+            console.error("Database error:", err);
+            res.status(500).json({ error: "Database error" });
+        } else if (row) {
+            console.log(`User found: ${userId}, subscribed: ${row.isSubscribed}`);
+            res.json({ isSubscribed: Boolean(row.isSubscribed) });
+        } else {
+            console.log(`User not found, creating: ${userId}`);
+            // If user doesn't exist, create them with default subscription status
+            db.run("INSERT INTO users (id, isSubscribed) VALUES (?, ?)", [userId, false], function (insertErr) {
+                if (insertErr) {
+                    console.error("Insert error:", insertErr);
+                    res.status(500).json({ error: "Database error" });
+                } else {
+                    console.log(`User created: ${userId}`);
+                    res.json({ isSubscribed: false });
+                }
+            });
+        }
+    });
+});
+
+/**
+ * Create a new user.
+ */
+app.post("/api/users", (req, res) => {
+    const { id, email } = req.body;
+    console.log(`Creating user: ${id}, email: ${email}`);
+
+    if (!id || !email) {
+        return res.status(400).json({ error: "User ID and email are required" });
+    }
+
+    // Use INSERT OR REPLACE to handle existing users
+    db.run("INSERT OR REPLACE INTO users (id, email, isSubscribed) VALUES (?, ?, ?)", [id, email, false], function (err) {
+        if (err) {
+            console.error("Database error:", err);
+            res.status(500).json({ error: "Database error" });
+        } else {
+            console.log(`User created successfully: ${id}`);
+            res.json({ message: "User created successfully", userId: id });
+        }
+    });
 });
 
 /**
@@ -32,92 +103,23 @@ app.post("/create-checkout-session", async (req, res) => {
     }
 
     try {
-        const session = await stripe.checkout.sessions.create({
-            line_items: [
-                {
-                    price_data: {
-                        currency: "usd",
-                        product_data: {
-                            name: "Premium Content Subscription",
-                            description: "Access to exclusive gated content",
-                        },
-                        unit_amount: 2000, // $20.00 (amount in cents)
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: "payment",
-            success_url: `${process.env.FRONTEND_URL}?success=true`,
-            cancel_url: `${process.env.FRONTEND_URL}?canceled=true`,
-            metadata: { userId },
-        });
-        res.json({ id: session.id });
+        // Add your Stripe checkout session creation logic here
+        res.json({ message: "Checkout session endpoint ready" });
     } catch (error) {
         console.error("Error creating checkout session:", error);
         res.status(500).json({ error: error.message });
     }
 });
 
-/**
- * Handles Stripe webhook events.
- */
-app.post("/stripe-webhook", async (req, res) => {
-    const sig = req.headers["stripe-signature"];
-    let event;
-
-    try {
-        event = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-        console.error(`Webhook Error: ${err.message}`);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    switch (event.type) {
-        case "checkout.session.completed": {
-            const session = event.data.object;
-            console.log(`Checkout session completed for session ID: ${session.id}`);
-            await handleCheckoutSessionCompleted(session);
-            break;
-        }
-        default:
-            console.log(`Unhandled event type ${event.type}`);
-    }
-
-    res.json({ received: true });
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
 });
-
-/**
- * Handles a completed checkout session to update user's subscription status in SQLite.
- */
-async function handleCheckoutSessionCompleted(session) {
-    const userId = session.metadata.userId;
-
-    if (!userId) {
-        console.error("Error: userId not found in session metadata.");
-        return;
-    }
-
-    try {
-        db.run(
-            "UPDATE users SET isSubscribed = ? WHERE id = ?",
-            [true, userId],
-            function (err) {
-                if (err) {
-                    console.error("Error updating subscription status in SQLite:", err.message);
-                } else if (this.changes > 0) {
-                    console.log(`User ${userId} subscription status updated to True in SQLite.`);
-                } else {
-                    console.log(`User ${userId} not found in SQLite.`);
-                }
-            }
-        );
-    } catch (error) {
-        console.error(`Error handling checkout session for user ${userId}:`, error);
-    }
-}
 
 // Start the server
 app.listen(PORT, () => {
-    console.log(`Node.js backend listening on port ${PORT}`);
+    console.log(`Backend is running on http://localhost:${PORT}`);
     console.log(`CORS enabled for: http://localhost:5175`);
+    console.log('Server started successfully');
 });
