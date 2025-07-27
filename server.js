@@ -7,10 +7,12 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const db = require("./db"); // Import SQLite database connection
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5000;
+
+// Enable CORS
+app.use(cors({ origin: "http://localhost:5175" })); // Allow requests from your frontend
 
 // Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL }));
 app.use(bodyParser.json());
 app.use(bodyParser.raw({ type: "application/json" })); // For Stripe webhook
 
@@ -117,5 +119,5 @@ async function handleCheckoutSessionCompleted(session) {
 // Start the server
 app.listen(PORT, () => {
     console.log(`Node.js backend listening on port ${PORT}`);
-    console.log(`CORS enabled for: ${process.env.FRONTEND_URL}`);
+    console.log(`CORS enabled for: http://localhost:5175`);
 });
